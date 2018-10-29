@@ -20,7 +20,7 @@
     NSLog(@"(c)2017 Don Coleman");
 
     [super pluginInitialize];
-    
+
     // TODO fail quickly if not supported
     if (![NFCNDEFReaderSession readingAvailable]) {
         NSLog(@"NFC Support is NOT available");
@@ -77,7 +77,7 @@
 
 - (void) readerSession:(NFCNDEFReaderSession *)session didDetectNDEFs:(NSArray<NFCNDEFMessage *> *)messages {
     NSLog(@"NFCNDEFReaderSession didDetectNDEFs");
-    
+
     for (NFCNDEFMessage *message in messages) {
         [self fireNdefEvent: message];
     }
@@ -85,21 +85,18 @@
 
 - (void) readerSession:(NFCNDEFReaderSession *)session didInvalidateWithError:(NSError *)error {
     NSLog(@"didInvalidateWithError %@ %@", error.localizedDescription, error.localizedFailureReason);
+    // Ignore system busy error
+    if (error.code == 203) {
+      return;
+    }
     if (ndefStartSessionCallbackId) {
-        NSString* errorMessage = [NSString stringWithFormat:@"error: %@", error.localizedDescription];
-        CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:errorMessage];
+        CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsInt:error.code];
         [self.commandDelegate sendPluginResult:pluginResult callbackId:ndefStartSessionCallbackId];
     }
 }
 
 - (void) readerSessionDidBecomeActive:(nonnull NFCReaderSession *)session {
     NSLog(@"readerSessionDidBecomeActive");
-    if (ndefStartSessionCallbackId) {
-        CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
-        //[pluginResult setKeepCallback:[NSNumber numberWithBool:YES]];
-        [self.commandDelegate sendPluginResult:pluginResult callbackId:ndefStartSessionCallbackId];
-        ndefStartSessionCallbackId = NULL;
-    }
 }
 
 #pragma mark - internal implementation
@@ -109,6 +106,14 @@
 // This is a bit convoluted and based on how PhoneGap 0.9 worked. A new implementation would send the data
 // in a success callback.
 -(void) fireNdefEvent:(NFCNDEFMessage *) ndefMessage {
+    // This event should close begin session event
+    // Functionality moved away from the readerSessionDidBecomeActive, since
+    // we were unable to detect canceling session and session exit on timeout
+    if (ndefStartSessionCallbackId) {
+        CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"OK"];
+        [self.commandDelegate sendPluginResult:pluginResult callbackId:ndefStartSessionCallbackId];
+        ndefStartSessionCallbackId = NULL;
+    }
     NSString *ndefMessageAsJSONString = [self ndefMessagetoJSONString:ndefMessage];
     NSLog(@"%@", ndefMessageAsJSONString);
 
@@ -123,13 +128,13 @@
 }
 
 -(NSString *) ndefMessagetoJSONString:(NFCNDEFMessage *) ndefMessage {
-    
+
     NSMutableArray *array = [NSMutableArray new];
     for (NFCNDEFPayload *record in ndefMessage.records){
         NSDictionary* recordDictionary = [self ndefRecordToNSDictionary:record];
         [array addObject:recordDictionary];
     }
-    
+
     // The JavaScript tag object expects a key with ndefMessage
     NSMutableDictionary *wrapper = [NSMutableDictionary new];
     [wrapper setObject:array forKey:@"ndefMessage"];
